@@ -29,12 +29,48 @@ public enum PaywallPresentationMode {
     @available(macOS, unavailable)
     case fullScreen
 
+    /// Paywall rendered inline in the modified view hierarchy. The exit offer, if any, is still presented modally.
+    case inline(exitOfferPresentationMode: ExitOfferPresentationMode = .sheet)
+
+}
+
+/// Presentation options to use for exit offers shown after an inline paywall is dismissed.
+public struct ExitOfferPresentationMode {
+
+    enum Kind {
+        case sheet
+
+        @available(macOS, unavailable)
+        case fullScreen
+    }
+
+    let kind: Kind
+
+    private init(kind: Kind) {
+        self.kind = kind
+    }
+
+    /// Exit offer presented using SwiftUI's `.sheet`.
+    public static let sheet = Self(kind: .sheet)
+
+    /// Exit offer presented using SwiftUI's `.fullScreenCover`. `.fullScreenCover` is unavailable on macOS.
+    @available(macOS, unavailable)
+    public static let fullScreen = Self(kind: .fullScreen)
+
 }
 
 extension PaywallPresentationMode {
 
     // swiftlint:disable:next missing_docs
     public static let `default`: Self = .sheet
+
+    fileprivate var isInline: Bool {
+        if case .inline = self {
+            return true
+        }
+
+        return false
+    }
 
 }
 
@@ -83,6 +119,8 @@ extension View {
     /// that it will ignore the offering configured in an active experiment.
     /// - Parameter fonts: An optional ``PaywallFontProvider``.
     /// - Parameter presentationMode: The desired presentation mode of the paywall. Defaults to `.sheet`.
+    /// Use `.inline` to render the main paywall directly in the modified view hierarchy. When using `.inline`,
+    /// the caller is responsible for removing or navigating away from the inline paywall after `onDismiss`.
     ///
     /// ### Related Articles
     /// [Documentation](https://rev.cat/paywalls)
@@ -145,6 +183,8 @@ extension View {
     /// that it will ignore the offering configured in an active experiment.
     /// - Parameter fonts: An optional ``PaywallFontProvider``.
     /// - Parameter presentationMode: The desired presentation mode of the paywall. Defaults to `.sheet`.
+    /// Use `.inline` to render the main paywall directly in the modified view hierarchy. When using `.inline`,
+    /// the caller is responsible for removing or navigating away from the inline paywall after `onDismiss`.
     ///
     /// ### Related Articles
     /// [Documentation](https://rev.cat/paywalls)
@@ -225,6 +265,8 @@ extension View {
     /// that it will ignore the offering configured in an active experiment.
     /// - Parameter fonts: An optional ``PaywallFontProvider``.
     /// - Parameter presentationMode: The desired presentation mode of the paywall. Defaults to `.sheet`.
+    /// Use `.inline` to render the main paywall directly in the modified view hierarchy. When using `.inline`,
+    /// the caller is responsible for removing or navigating away from the inline paywall after `onDismiss`.
     ///
     /// ### Related Articles
     /// [Documentation](https://rev.cat/paywalls)
@@ -313,6 +355,8 @@ extension View {
     /// that it will ignore the offering configured in an active experiment.
     /// - Parameter fonts: An optional ``PaywallFontProvider``.
     /// - Parameter presentationMode: The desired presentation mode of the paywall. Defaults to `.sheet`.
+    /// Use `.inline` to render the main paywall directly in the modified view hierarchy. When using `.inline`,
+    /// the caller is responsible for removing or navigating away from the inline paywall after `onDismiss`.
     ///
     /// ### Related Articles
     /// [Documentation](https://rev.cat/paywalls)
@@ -432,6 +476,7 @@ extension View {
     ///     The binding is set to `nil` when the paywall (and any exit offer) is dismissed.
     ///   - fonts: An optional ``PaywallFontProvider``.
     ///   - presentationMode: The desired presentation mode of the paywall. Defaults to `.sheet`.
+    ///     `.inline` is treated as `.sheet` by this binding-based presentation API.
     ///   - purchaseStarted: Called when a purchase is initiated.
     ///   - purchaseCompleted: Called when a purchase completes successfully.
     ///   - purchaseCancelled: Called when a purchase is cancelled.
@@ -577,37 +622,16 @@ private struct PresentingPaywallModifier: ViewModifier {
     @StateObject
     private var exitOfferPresenter: ExitOfferPresenter
 
+    @State
+    private var didHandleMainPaywallDismiss = false
+
     /// Set when a workflow completes through purchase or restore-driven dismissal.
     /// Regular paywalls ignore this environment value; only `WorkflowPaywallView` consumes it.
     @State
     private var workflowCompletedInSession = false
 
     func body(content: Content) -> some View {
-        Group {
-            switch presentationMode {
-            case .sheet:
-                content
-                    .sheet(item: self.$data, onDismiss: self.handleMainPaywallDismiss) { data in
-                        self.paywallView(data)
-                        // The default height given to sheets on Mac Catalyst is too small, and looks terrible.
-                        // So we need to give it a more reasonable default size. This is the height of an
-                        // iPhone 6/7/8 screen. This aligns with our documentation that we will show a paywall
-                        // in a modal that is "roughly iPhone sized", and if you want to customize further you
-                        // can use PaywallView.
-                        // https://www.revenuecat.com/docs/tools/paywalls/displaying-paywalls
-                        #if targetEnvironment(macCatalyst) || os(macOS)
-                            .frame(height: 667)
-                        #endif
-                    }
-            #if !os(macOS)
-            case .fullScreen:
-                content
-                    .fullScreenCover(item: self.$data, onDismiss: self.handleMainPaywallDismiss) { data in
-                        self.paywallView(data)
-                    }
-            #endif
-            }
-        }
+        self.presentingContent(content)
         .exitOfferSheet(
             presenter: self.exitOfferPresenter,
             presentationMode: self.presentationMode,
@@ -638,6 +662,39 @@ private struct PresentingPaywallModifier: ViewModifier {
         }
     }
 
+    @ViewBuilder
+    private func presentingContent(_ content: Content) -> some View {
+        switch presentationMode {
+        case .inline:
+            if let data = self.data {
+                self.paywallView(data)
+            } else {
+                content
+            }
+        case .sheet:
+            content
+                .sheet(item: self.$data, onDismiss: self.handleMainPaywallDismiss) { data in
+                    self.paywallView(data)
+                    // The default height given to sheets on Mac Catalyst is too small, and looks terrible.
+                    // So we need to give it a more reasonable default size. This is the height of an
+                    // iPhone 6/7/8 screen. This aligns with our documentation that we will show a paywall
+                    // in a modal that is "roughly iPhone sized", and if you want to customize further you
+                    // can use PaywallView.
+                    // https://www.revenuecat.com/docs/tools/paywalls/displaying-paywalls
+                    #if targetEnvironment(macCatalyst) || os(macOS)
+                        .frame(height: 667)
+                    #endif
+                }
+        #if !os(macOS)
+        case .fullScreen:
+            content
+                .fullScreenCover(item: self.$data, onDismiss: self.handleMainPaywallDismiss) { data in
+                    self.paywallView(data)
+                }
+        #endif
+        }
+    }
+
     private func updateCustomerInfo() async {
         guard let info = try? await self.customerInfoFetcher() else { return }
 
@@ -646,6 +703,9 @@ private struct PresentingPaywallModifier: ViewModifier {
         if self.shouldDisplay(info) {
             Logger.debug(Strings.displaying_paywall)
 
+            if self.data == nil || self.presentationMode.isInline {
+                self.didHandleMainPaywallDismiss = false
+            }
             self.data = .init(customerInfo: info)
         } else {
             Logger.debug(Strings.not_displaying_paywall)
@@ -699,6 +759,9 @@ private struct PresentingPaywallModifier: ViewModifier {
             self.urlOpened?(url)
         }
         .interactiveDismissDisabled(self.purchaseHandler.actionInProgress)
+        .onRequestedDismissal {
+            self.close()
+        }
         .workflowExitOfferSource(presenter: self.exitOfferPresenter) {
             await self.purchaseHandler.resolveOffering(for: self.content)
         }
@@ -706,6 +769,11 @@ private struct PresentingPaywallModifier: ViewModifier {
 
     private func close() {
         Logger.debug(Strings.dismissing_paywall)
+
+        if case .inline = self.presentationMode {
+            self.handleMainPaywallDismiss()
+            return
+        }
 
         self.data = nil
     }
@@ -744,6 +812,9 @@ private struct PresentingPaywallModifier: ViewModifier {
     /// - If a purchase happened in this session, we use `shouldDisplay` with the result's `CustomerInfo`
     /// - This ensures consistent behavior with how the first paywall decides to show/close
     private func handleMainPaywallDismiss() {
+        guard !self.didHandleMainPaywallDismiss else { return }
+        self.didHandleMainPaywallDismiss = true
+
         // Prevent double processing
         guard !self.exitOfferPresenter.isPresentingExitOffer else { return }
 
@@ -921,7 +992,7 @@ private struct PresentingPaywallBindingModifier: ViewModifier {
     func body(content: Content) -> some View {
         Group {
             switch presentationMode {
-            case .sheet:
+            case .inline, .sheet:
                 content
                     .sheet(item: self.$offering, onDismiss: self.handleMainPaywallDismiss) { offering in
                         self.paywallView(for: offering)
@@ -940,11 +1011,15 @@ private struct PresentingPaywallBindingModifier: ViewModifier {
         }
         .exitOfferSheet(
             presenter: self.exitOfferPresenter,
-            presentationMode: self.presentationMode,
+            presentationMode: self.effectivePresentationMode,
             onDismiss: self.onDismiss
         ) { exitOffering in
             self.exitOfferPaywallView(for: exitOffering)
         }
+    }
+
+    private var effectivePresentationMode: PaywallPresentationMode {
+        self.presentationMode.isInline ? .sheet : self.presentationMode
     }
 
     private func paywallView(for offering: Offering) -> some View {

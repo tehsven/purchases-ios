@@ -96,6 +96,25 @@ final class ExitOfferPresenter: ObservableObject {
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @available(tvOS, unavailable)
+extension PaywallPresentationMode {
+
+    var exitOfferPresentationMode: ExitOfferPresentationMode {
+        switch self {
+        case .sheet:
+            return .sheet
+        #if !os(macOS)
+        case .fullScreen:
+            return .fullScreen
+        #endif
+        case .inline(let exitOfferPresentationMode):
+            return exitOfferPresentationMode
+        }
+    }
+
+}
+
+@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+@available(tvOS, unavailable)
 @MainActor
 extension View {
 
@@ -124,8 +143,10 @@ extension View {
     ) -> some View {
         // Inline the dismiss closures (rather than a typed local) so they inherit the extension's
         // @MainActor isolation and can call the presenter's main-actor methods on older toolchains.
+        let exitOfferPresentationMode = presentationMode.exitOfferPresentationMode
+
         return Group {
-            switch presentationMode {
+            switch exitOfferPresentationMode.kind {
             case .sheet:
                 self.sheet(
                     item: presenter.presentedBinding,

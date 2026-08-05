@@ -96,6 +96,11 @@ struct App: View {
             .presentPaywallIfNeeded(requiredEntitlementIdentifier: "", fonts: self.fonts)
             .presentPaywallIfNeeded(requiredEntitlementIdentifier: "", presentationMode: .sheet)
             .presentPaywallIfNeeded(requiredEntitlementIdentifier: "", presentationMode: .fullScreen)
+            .presentPaywallIfNeeded(requiredEntitlementIdentifier: "", presentationMode: .inline())
+            .presentPaywallIfNeeded(
+                requiredEntitlementIdentifier: "",
+                presentationMode: .inline(exitOfferPresentationMode: .fullScreen)
+            )
             .presentPaywallIfNeeded(requiredEntitlementIdentifier: "",
                                     purchaseCompleted: self.purchaseOrRestoreCompleted)
             .presentPaywallIfNeeded(requiredEntitlementIdentifier: "",
@@ -263,6 +268,14 @@ struct App: View {
                 self.purchaseOrRestoreCompleted($0)
             }
             .presentPaywallIfNeeded(presentationMode: .sheet) { (_: CustomerInfo) in
+                false
+            }
+            .presentPaywallIfNeeded(presentationMode: .inline()) { (_: CustomerInfo) in
+                false
+            }
+            .presentPaywallIfNeeded(
+                presentationMode: .inline(exitOfferPresentationMode: .fullScreen)
+            ) { (_: CustomerInfo) in
                 false
             }
             .presentPaywallIfNeeded(offering: self.offering, fonts: self.fonts) { (_: CustomerInfo) in
@@ -844,6 +857,7 @@ struct App: View {
         switch mode {
         case .sheet: break
         case .fullScreen: break
+        case .inline: break
         }
     }
 
