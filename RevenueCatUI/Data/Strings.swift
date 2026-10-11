@@ -28,6 +28,7 @@ enum Strings {
     case determining_whether_to_display_paywall
     case displaying_paywall
     case not_displaying_paywall
+    case not_displaying_paywall_customer_info_unavailable(Error)
     case dismissing_paywall
     case tier_has_no_available_products_for_paywall(String)
 
@@ -164,6 +165,9 @@ extension Strings: CustomStringConvertible {
 
         case .not_displaying_paywall:
             return "Condition not met: will not display paywall"
+
+        case let .not_displaying_paywall_customer_info_unavailable(error):
+            return "Could not fetch CustomerInfo: will not display paywall. Error: \(error)"
 
         case .dismissing_paywall:
             return "Dismissing PaywallView"

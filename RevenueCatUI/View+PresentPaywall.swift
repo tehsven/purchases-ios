@@ -112,7 +112,7 @@ extension View {
     /// }
     /// ```
     /// - Note: If loading the `CustomerInfo` fails (for example, if Internet is offline),
-    /// the paywall won't be displayed.
+    /// the paywall won't be displayed and `onDismiss` is called.
     ///
     /// - Parameter offering: The `Offering` containing the desired paywall to display.
     /// If `nil` (the default), `Offerings.current` will be used. Note that specifying this parameter means
@@ -176,7 +176,7 @@ extension View {
     /// }
     /// ```
     /// - Note: If loading the `CustomerInfo` fails (for example, if Internet is offline),
-    /// the paywall won't be displayed.
+    /// the paywall won't be displayed and `onDismiss` is called.
     ///
     /// - Parameter offering: The `Offering` containing the desired paywall to display.
     /// If `nil` (the default), `Offerings.current` will be used. Note that specifying this parameter means
@@ -258,7 +258,7 @@ extension View {
     /// }
     /// ```
     /// - Note: If loading the `CustomerInfo` fails (for example, if Internet is offline),
-    /// the paywall won't be displayed.
+    /// the paywall won't be displayed and `onDismiss` is called.
     ///
     /// - Parameter offering: The `Offering` containing the desired paywall to display.
     /// If `nil` (the default), `Offerings.current` will be used. Note that specifying this parameter means
@@ -348,7 +348,7 @@ extension View {
     /// }
     /// ```
     /// - Note: If loading the `CustomerInfo` fails (for example, if Internet is offline),
-    /// the paywall won't be displayed.
+    /// the paywall won't be displayed and `onDismiss` is called.
     ///
     /// - Parameter offering: The `Offering` containing the desired paywall to display.
     /// If `nil` (the default), `Offerings.current` will be used. Note that specifying this parameter means
@@ -640,7 +640,7 @@ private struct PresentingPaywallModifier: ViewModifier {
             self.exitOfferPaywallView(for: offering)
         }
         .task {
-            await self.updateCustomerInfo()
+            await self.updateCustomerInfo(isInitialLoad: true)
         }
         .onChangeOfWithChange(self.scenePhase) { value in
             // Used when Offer Code Redemption sheet dismisses
@@ -648,14 +648,14 @@ private struct PresentingPaywallModifier: ViewModifier {
             case .new(let newPhase):
                 if newPhase == .active {
                     Task {
-                        await self.updateCustomerInfo()
+                        await self.updateCustomerInfo(isInitialLoad: false)
                     }
                 }
             case .changed(old: let oldPhase, new: let newPhase):
                 // Used when Offer Code Redemption sheet dismisses
                 if newPhase == .active && oldPhase == .inactive {
                     Task {
-                        await self.updateCustomerInfo()
+                        await self.updateCustomerInfo(isInitialLoad: false)
                     }
                 }
             }
@@ -695,8 +695,19 @@ private struct PresentingPaywallModifier: ViewModifier {
         }
     }
 
-    private func updateCustomerInfo() async {
-        guard let info = try? await self.customerInfoFetcher() else { return }
+    private func updateCustomerInfo(isInitialLoad: Bool) async {
+        let info: CustomerInfo
+        do {
+            info = try await self.customerInfoFetcher()
+        } catch {
+            Logger.error(Strings.not_displaying_paywall_customer_info_unavailable(error))
+
+            // Callers waiting on `onDismiss` would otherwise wait forever for a paywall that never appears.
+            if isInitialLoad && self.data == nil {
+                self.onDismiss?()
+            }
+            return
+        }
 
         Logger.debug(Strings.determining_whether_to_display_paywall)
 

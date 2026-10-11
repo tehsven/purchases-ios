@@ -145,6 +145,61 @@ class PresentIfNeededTests: TestCase {
         expect(dismissCount).toEventually(equal(2))
     }
 
+    func testCustomerInfoFailureCallsOnDismissWithoutDisplayingPaywall() throws {
+        var shouldDisplayCalled = false
+        var dismissCount = 0
+
+        let dispose = try Text("")
+            .presentPaywallIfNeeded(offering: Self.offering,
+                                    introEligibility: .producing(eligibility: .eligible),
+                                    purchaseHandler: Self.purchaseHandler) { _ in
+                shouldDisplayCalled = true
+                return true
+            } onDismiss: {
+                dismissCount += 1
+            } customerInfoFetcher: {
+                throw Self.failureError
+            }
+            .addToHierarchy()
+
+        defer { dispose() }
+
+        expect(dismissCount).toEventually(equal(1))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        expect(dismissCount) == 1
+        expect(shouldDisplayCalled) == false
+    }
+
+    func testCustomerInfoRefreshFailureDoesNotDismissDisplayedPaywall() throws {
+        let scenePhaseController = ScenePhaseController()
+        let fetcher = FailingAfterFirstCustomerInfoFetcher()
+        var dismissCount = 0
+
+        let dispose = try InlinePaywall(
+            scenePhaseController: scenePhaseController,
+            purchaseHandler: .mock(),
+            onDismiss: {
+                dismissCount += 1
+            },
+            customerInfoFetcher: {
+                try fetcher.fetch()
+            }
+        )
+        .addToHierarchy()
+
+        defer { dispose() }
+
+        expect(fetcher.fetchCount).toEventually(beGreaterThanOrEqualTo(1))
+
+        scenePhaseController.scenePhase = .inactive
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        scenePhaseController.scenePhase = .active
+
+        expect(fetcher.fetchCount).toEventually(beGreaterThanOrEqualTo(2))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        expect(dismissCount) == 0
+    }
+
     func testPresentWithPurchaseFailureHandler() throws {
         var error: NSError?
 
@@ -370,6 +425,7 @@ private struct InlinePaywall: View {
 
     let purchaseHandler: PurchaseHandler
     let onDismiss: () -> Void
+    var customerInfoFetcher: View.CustomerInfoFetcher = { TestData.customerInfo }
 
     var body: some View {
         Text("")
@@ -381,9 +437,31 @@ private struct InlinePaywall: View {
             } onDismiss: {
                 self.onDismiss()
             } customerInfoFetcher: {
-                return TestData.customerInfo
+                try await self.customerInfoFetcher()
             }
             .environment(\.scenePhase, self.scenePhaseController.scenePhase)
+    }
+
+}
+
+/// Returns `CustomerInfo` on the first fetch and throws on every later one.
+private final class FailingAfterFirstCustomerInfoFetcher: @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var count = 0
+
+    var fetchCount: Int {
+        self.lock.withLock { self.count }
+    }
+
+    func fetch() throws -> CustomerInfo {
+        let count = self.lock.withLock {
+            self.count += 1
+            return self.count
+        }
+
+        guard count == 1 else { throw ErrorCode.networkError }
+        return TestData.customerInfo
     }
 
 }
